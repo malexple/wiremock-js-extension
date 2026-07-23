@@ -1,0 +1,18 @@
+services:
+  wiremock:
+    image: wiremock/wiremock:3.13.1
+    container_name: wiremock-server
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./wiremock/mappings:/home/wiremock/mappings
+      - ./wiremock/files:/home/wiremock/__files
+      - ./wiremock/extensions/wiremock-js-extension.jar:/var/wiremock/extensions/wiremock-js-extension.jar
+      - ./wiremock/scripts:/home/wiremock/scripts
+    environment:
+      - WIREMOCKJS_STORAGE_DIR=/home/wiremock/scripts
+    command:
+      - "--port=8080"
+      - "--verbose"
+      - "--local-response-templating"
+      - "--extensions=ru.mcs.wiremockjs.ScriptTransformer,ru.mcs.wiremockjs.admin.ScriptAdminApi"

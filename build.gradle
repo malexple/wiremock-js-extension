@@ -1,0 +1,72 @@
+plugins {
+    id 'java'
+    id 'antlr'
+}
+
+group = 'ru.mcs.wiremockjs'
+version = '0.1.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+compileTestJava {
+    options.release = 21
+}
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    antlr 'org.antlr:antlr4:4.13.2'
+    implementation 'org.antlr:antlr4-runtime:4.13.2'
+
+    compileOnly 'org.wiremock:wiremock:3.13.1'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testImplementation 'org.wiremock:wiremock:3.13.1'
+    testImplementation 'org.mockito:mockito-core:5.12.0'
+}
+
+generateGrammarSource {
+    arguments += ['-visitor', '-package', 'ru.mcs.wiremockjs.grammar']
+    outputDirectory = file("${buildDir}/generated-src/antlr/main/ru/mcs/wiremockjs/grammar")
+}
+
+compileJava {
+    dependsOn generateGrammarSource
+    options.release = 11
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs += "${buildDir}/generated-src/antlr/main"
+        }
+    }
+}
+
+test {
+    useJUnitPlatform()
+}
+
+jar {
+    archiveFileName = 'wiremock-js-extension.jar'
+    from {
+        configurations.runtimeClasspath.collect {
+            it.isDirectory() ? it : zipTree(it)
+        }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.register('copyToExtensions', Copy) {
+    dependsOn jar
+    from jar.archiveFile
+    into "${rootDir}/wiremock/extensions"
+}
+
+build.dependsOn copyToExtensions
