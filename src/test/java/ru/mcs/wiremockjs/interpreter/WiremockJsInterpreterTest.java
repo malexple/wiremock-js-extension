@@ -9,8 +9,11 @@ import org.mockito.Mockito;
 import ru.mcs.wiremockjs.exception.ScriptExecutionException;
 import ru.mcs.wiremockjs.exception.ScriptParseException;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.when;
@@ -762,5 +765,175 @@ class WiremockJsInterpreterTest {
         Map<String, Object> result = run(script);
 
         assertEquals(200L, result.get("status"));
+    }
+
+    @Test
+    @DisplayName("now() возвращает валидный ISO-8601 timestamp с миллисекундами")
+    void shouldReturnValidIsoTimestamp() {
+        String script = """
+        return { "timestamp": now() };
+        """;
+
+        Map<String, Object> result = run(script);
+        String timestamp = (String) result.get("timestamp");
+
+        assertNotNull(timestamp);
+        assertDoesNotThrow(() -> Instant.parse(timestamp));
+    }
+
+    @Test
+    @DisplayName("nowPlusDays() возвращает timestamp в будущем")
+    void shouldReturnFutureTimestampForNowPlusDays() {
+        String script = """
+        return { "expiresAt": nowPlusDays(7) };
+        """;
+
+        Map<String, Object> result = run(script);
+        Instant expiresAt = Instant.parse((String) result.get("expiresAt"));
+
+        assertTrue(expiresAt.isAfter(Instant.now().plus(6, ChronoUnit.DAYS)));
+    }
+
+    @Test
+    @DisplayName("nowPlusDays() с отрицательным значением возвращает timestamp в прошлом")
+    void shouldReturnPastTimestampForNegativeDays() {
+        String script = """
+        return { "issuedAt": nowPlusDays(-1) };
+        """;
+
+        Map<String, Object> result = run(script);
+        Instant issuedAt = Instant.parse((String) result.get("issuedAt"));
+
+        assertTrue(issuedAt.isBefore(Instant.now()));
+    }
+
+    @Test
+    @DisplayName("uuid() возвращает валидный UUID v4")
+    void shouldReturnValidUuid() {
+        String script = """
+        return { "id": uuid() };
+        """;
+
+        Map<String, Object> result = run(script);
+        String id = (String) result.get("id");
+
+        assertDoesNotThrow(() -> UUID.fromString(id));
+    }
+
+    @Test
+    @DisplayName("uuid() с одинаковым seed детерминирован")
+    void shouldBeDeterministicUuidWithSameSeed() {
+        String script = """
+        return { "id": uuid() };
+        """;
+
+        WiremockJsInterpreter interpreter1 = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+        WiremockJsInterpreter interpreter2 = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+
+        Map<String, Object> result1 = interpreter1.execute(script, 100);
+        Map<String, Object> result2 = interpreter2.execute(script, 100);
+
+        assertEquals(result1.get("id"), result2.get("id"));
+    }
+
+    @Test
+    @DisplayName("randomInt(min, max) включает обе границы")
+    void shouldReturnRandomIntWithinInclusiveRange() {
+        String script = """
+        return { "value": randomInt(1, 5) };
+        """;
+
+        for (int i = 0; i < 50; i++) {
+            Map<String, Object> result = run(script);
+            double value = ((Number) result.get("value")).doubleValue();
+            assertTrue(value >= 1 && value <= 5);
+        }
+    }
+
+    @Test
+    @DisplayName("randomInt(min, max) с min == max всегда возвращает min")
+    void shouldReturnSameValueWhenMinEqualsMax() {
+        String script = """
+        return { "value": randomInt(3, 3) };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(3.0, result.get("value"));
+    }
+
+    @Test
+    @DisplayName("randomInt(min, max) с min больше max бросает ScriptExecutionException")
+    void shouldThrowWhenMinGreaterThanMax() {
+        String script = """
+        return { "value": randomInt(10, 1) };
+        """;
+
+        WiremockJsInterpreter interpreter = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+
+        assertThrows(ScriptExecutionException.class, () -> interpreter.execute(script));
+    }
+
+    @Test
+    @DisplayName("matches() корректно проверяет соответствие email-паттерну")
+    void shouldMatchEmailPattern() {
+        String script = """
+        if (matches("test@example.com", "^[\\w.]+@[\\w.]+\\.[a-z]+$")) {
+          return { "valid": true };
+        } else {
+          return { "valid": false };
+        }
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(true, result.get("valid"));
+    }
+
+    @Test
+    @DisplayName("matches() возвращает false при несоответствии паттерну")
+    void shouldReturnFalseWhenNoMatch() {
+        String script = """
+        if (matches("not-an-email", "^[\\w.]+@[\\w.]+\\.[a-z]+$")) {
+          return { "valid": true };
+        } else {
+          return { "valid": false };
+        }
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(false, result.get("valid"));
+    }
+
+    @Test
+    @DisplayName("matches() безопасно обрабатывает потенциально катастрофический паттерн без зависания")
+    void shouldHandleCatastrophicPatternSafely() {
+        String script = """
+        if (matches("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", "(a+)+b")) {
+          return { "valid": true };
+        } else {
+          return { "valid": false };
+        }
+        """;
+
+        long start = System.currentTimeMillis();
+        Map<String, Object> result = run(script);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertEquals(false, result.get("valid"));
+        assertTrue(elapsed < 500);
+    }
+
+    @Test
+    @DisplayName("matches() с некорректным regex бросает ScriptExecutionException")
+    void shouldThrowForInvalidRegexPattern() {
+        String script = """
+        return { "valid": matches("test", "[") };
+        """;
+
+        WiremockJsInterpreter interpreter = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+
+        assertThrows(ScriptExecutionException.class, () -> interpreter.execute(script));
     }
 }

@@ -12,6 +12,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.Random;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.UUID;
 
 public class WiremockJsInterpreter {
 
@@ -148,9 +151,50 @@ public class WiremockJsInterpreter {
                     return haystack.contains(needle);
                 }
                 case "random": return random.nextDouble();
+                case "now": return Instant.now().toString();
+                case "nowPlusDays": return Instant.now().plus((long) num(args, 0), ChronoUnit.DAYS).toString();
+                case "uuid": return generateUuid();
+                case "randomInt": return (double) randomInt((int) num(args, 0), (int) num(args, 1));
+                case "matches": {
+                    String input = str(args, 0);
+                    String pattern = str(args, 1);
+                    if (input == null || pattern == null) {
+                        return false;
+                    }
+                    try {
+                        return com.google.re2j.Pattern.matches(pattern, input);
+                    } catch (com.google.re2j.PatternSyntaxException e) {
+                        throw new ScriptExecutionException("Некорректное регулярное выражение: " + e.getMessage());
+                    }
+                }
                 default:
                     throw new ScriptExecutionException("Функция не разрешена или не существует: " + name);
             }
+        }
+
+        private int randomInt(int min, int max) {
+            if (min > max) {
+                throw new ScriptExecutionException(
+                        "randomInt(): min (" + min + ") не может быть больше max (" + max + ")");
+            }
+            return random.nextInt(max - min + 1) + min;
+        }
+
+        private String generateUuid() {
+            byte[] randomBytes = new byte[16];
+            random.nextBytes(randomBytes);
+
+            randomBytes[6] &= 0x0f;
+            randomBytes[6] |= 0x40;
+            randomBytes[8] &= 0x3f;
+            randomBytes[8] |= (byte) 0x80;
+
+            long msb = 0;
+            long lsb = 0;
+            for (int i = 0; i < 8; i++) msb = (msb << 8) | (randomBytes[i] & 0xff);
+            for (int i = 8; i < 16; i++) lsb = (lsb << 8) | (randomBytes[i] & 0xff);
+
+            return new UUID(msb, lsb).toString();
         }
 
         @Override
