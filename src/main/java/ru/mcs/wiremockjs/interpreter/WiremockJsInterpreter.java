@@ -176,6 +176,9 @@ public class WiremockJsInterpreter {
             if (ctx.BOOLEAN() != null) {
                 return Boolean.parseBoolean(ctx.BOOLEAN().getText());
             }
+            if (ctx.NULL() != null) {
+                return null;
+            }
             if (ctx.jsonObject() != null) {
                 return visit(ctx.jsonObject());
             }
@@ -199,7 +202,9 @@ public class WiremockJsInterpreter {
             Object left = visit(ctx.expression(0));
             Object right = visit(ctx.expression(1));
             boolean eq;
-            if (isNumeric(left) && isNumeric(right)) {
+            if (left == null || right == null) {
+                eq = left == right;
+            } else if (isNumeric(left) && isNumeric(right)) {
                 eq = num(List.of(left), 0) == num(List.of(right), 0);
             } else {
                 eq = String.valueOf(left).equals(String.valueOf(right));

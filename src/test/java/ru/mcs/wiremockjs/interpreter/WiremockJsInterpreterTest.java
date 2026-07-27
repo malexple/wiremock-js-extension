@@ -12,8 +12,7 @@ import ru.mcs.wiremockjs.exception.ScriptParseException;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.when;
 
 class WiremockJsInterpreterTest {
@@ -398,5 +397,85 @@ class WiremockJsInterpreterTest {
         Map<String, Object> result = run(script);
 
         assertEquals(200.0, result.get("total"));
+    }
+
+    @Test
+    @DisplayName("Литерал null возвращается как Java null")
+    void shouldParseNullLiteral() {
+        String script = """
+        return { "result": null };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertNull(result.get("result"));
+    }
+
+    @Test
+    @DisplayName("Сравнение null == null возвращает true")
+    void shouldTreatNullEqualsNullAsTrue() {
+        String script = """
+        if (null == null) {
+          return { "matched": true };
+        } else {
+          return { "matched": false };
+        }
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(true, result.get("matched"));
+    }
+
+    @Test
+    @DisplayName("jsonField() для отсутствующего пути сравнивается с null через ==")
+    void shouldCompareMissingJsonFieldWithNull() {
+        when(mockRequest.getBodyAsString()).thenReturn("{\"user\": {\"role\": \"admin\"}}");
+
+        String script = """
+        var city = jsonField("user.address.city");
+        if (city == null) {
+          return { "hasCity": false };
+        } else {
+          return { "hasCity": true };
+        }
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(false, result.get("hasCity"));
+    }
+
+    @Test
+    @DisplayName("null не равен строке null и не равен строке-значению")
+    void shouldNotConfuseNullWithStringNull() {
+        String script = """
+        if (null == "null") {
+          return { "matched": true };
+        } else {
+          return { "matched": false };
+        }
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(false, result.get("matched"));
+    }
+
+    @Test
+    @DisplayName("null в условии if трактуется как false")
+    void shouldTreatNullAsFalsyInCondition() {
+        String script = """
+        var x = null;
+        if (x) {
+          return { "result": "truthy" };
+        } else {
+          return { "result": "falsy" };
+        }
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals("falsy", result.get("result"));
     }
 }

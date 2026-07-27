@@ -53,6 +53,7 @@ literal
     : STRING
     | NUMBER
     | BOOLEAN
+    | NULL
     | jsonObject
     ;
 
@@ -68,6 +69,7 @@ IF: 'if';
 ELSE: 'else';
 RETURN: 'return';
 VAR: 'var';
+NULL: 'null';
 AND: '&&';
 OR: '||';
 NOT: '!';
