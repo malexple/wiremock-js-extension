@@ -584,4 +584,107 @@ class WiremockJsInterpreterTest {
 
         assertEquals(400L, result.get("status"));
     }
+
+    @Test
+    @DisplayName("contains() с null в качестве искомой строки безопасно возвращает false")
+    void shouldReturnFalseWhenContainsNeedleIsNull() {
+        String script = """
+        var x = null;
+        if (contains("some text", x)) {
+          return { "matched": true };
+        } else {
+          return { "matched": false };
+        }
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(false, result.get("matched"));
+    }
+
+    @Test
+    @DisplayName("contains() с null в качестве исходной строки безопасно возвращает false")
+    void shouldReturnFalseWhenContainsHaystackIsNull() {
+        when(mockRequest.queryParameter("token"))
+                .thenReturn(QueryParameter.absent("token"));
+
+        String script = """
+        if (contains(query("token"), "secret")) {
+          return { "matched": true };
+        } else {
+          return { "matched": false };
+        }
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(false, result.get("matched"));
+    }
+
+    @Test
+    @DisplayName("Сравнение null с числом через > бросает ScriptExecutionException")
+    void shouldThrowWhenComparingNullWithNumber() {
+        when(mockRequest.queryParameter("amount"))
+                .thenReturn(QueryParameter.absent("amount"));
+
+        String script = """
+        if (query("amount") > 1000) {
+          return { "approved": false };
+        } else {
+          return { "approved": true };
+        }
+        """;
+
+        WiremockJsInterpreter interpreter = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+
+        assertThrows(ScriptExecutionException.class, () -> interpreter.execute(script));
+    }
+
+    @Test
+    @DisplayName("Арифметика с null-переменной бросает ScriptExecutionException")
+    void shouldThrowWhenArithmeticWithNullVariable() {
+        String script = """
+        var x = null;
+        return { "result": x + 5 };
+        """;
+
+        WiremockJsInterpreter interpreter = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+
+        assertThrows(ScriptExecutionException.class, () -> interpreter.execute(script));
+    }
+
+    @Test
+    @DisplayName("Нечисловая строка в арифметике бросает ScriptExecutionException с понятным сообщением")
+    void shouldThrowWithClearMessageForNonNumericString() {
+        String script = """
+        var x = "abc";
+        return { "result": x + 5 };
+        """;
+
+        WiremockJsInterpreter interpreter = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+
+        ScriptExecutionException ex = assertThrows(ScriptExecutionException.class,
+                () -> interpreter.execute(script));
+        assertTrue(ex.getMessage().contains("abc"));
+    }
+
+    @Test
+    @DisplayName("Рекомендуемый паттерн: явная null-проверка перед арифметикой предотвращает исключение")
+    void shouldAvoidExceptionWithExplicitNullCheck() {
+        when(mockRequest.queryParameter("amount"))
+                .thenReturn(QueryParameter.absent("amount"));
+
+        String script = """
+        var amount = query("amount");
+        if (amount != null && amount > 1000) {
+          return { "approved": false };
+        } else {
+          return { "approved": true };
+        }
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(true, result.get("approved"));
+    }
 }

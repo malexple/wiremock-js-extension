@@ -131,8 +131,14 @@ public class WiremockJsInterpreter {
                 case "method": return requestFacade.method();
                 case "pathSegment": return requestFacade.pathSegment((int) num(args, 0));
                 case "jsonField": return requestFacade.jsonField(str(args, 0));
-                case "contains":
-                    return str(args, 0) != null && str(args, 0).contains(str(args, 1));
+                case "contains": {
+                    String haystack = str(args, 0);
+                    String needle = str(args, 1);
+                    if (haystack == null || needle == null) {
+                        return false;
+                    }
+                    return haystack.contains(needle);
+                }
                 default:
                     throw new ScriptExecutionException("Функция не разрешена или не существует: " + name);
             }
@@ -210,8 +216,8 @@ public class WiremockJsInterpreter {
 
         @Override
         public Object visitCompare(WiremockJsParser.CompareContext ctx) {
-            double left = num(List.of(visit(ctx.expression(0))), 0);
-            double right = num(List.of(visit(ctx.expression(1))), 0);
+            double left = num(visit(ctx.expression(0)));
+            double right = num(visit(ctx.expression(1)));
             String op = ctx.op.getText();
             if (op.equals(">")) return left > right;
             if (op.equals(">=")) return left >= right;
@@ -228,7 +234,7 @@ public class WiremockJsInterpreter {
             if (left == null || right == null) {
                 eq = left == right;
             } else if (isNumeric(left) && isNumeric(right)) {
-                eq = num(List.of(left), 0) == num(List.of(right), 0);
+                eq = num(left) == num(right);
             } else {
                 eq = String.valueOf(left).equals(String.valueOf(right));
             }
@@ -247,12 +253,18 @@ public class WiremockJsInterpreter {
 
         @Override
         public Object visitLogicalAnd(WiremockJsParser.LogicalAndContext ctx) {
-            return toBoolean(visit(ctx.expression(0))) && toBoolean(visit(ctx.expression(1)));
+            if (!toBoolean(visit(ctx.expression(0)))) {
+                return false;
+            }
+            return toBoolean(visit(ctx.expression(1)));
         }
 
         @Override
         public Object visitLogicalOr(WiremockJsParser.LogicalOrContext ctx) {
-            return toBoolean(visit(ctx.expression(0))) || toBoolean(visit(ctx.expression(1)));
+            if (toBoolean(visit(ctx.expression(0)))) {
+                return true;
+            }
+            return toBoolean(visit(ctx.expression(1)));
         }
 
         @Override
@@ -262,15 +274,15 @@ public class WiremockJsInterpreter {
 
         @Override
         public Object visitAddSub(WiremockJsParser.AddSubContext ctx) {
-            double left = num(List.of(visit(ctx.expression(0))), 0);
-            double right = num(List.of(visit(ctx.expression(1))), 0);
+            double left = num(visit(ctx.expression(0)));
+            double right = num(visit(ctx.expression(1)));
             return ctx.op.getText().equals("+") ? left + right : left - right;
         }
 
         @Override
         public Object visitMulDiv(WiremockJsParser.MulDivContext ctx) {
-            double left = num(List.of(visit(ctx.expression(0))), 0);
-            double right = num(List.of(visit(ctx.expression(1))), 0);
+            double left = num(visit(ctx.expression(0)));
+            double right = num(visit(ctx.expression(1)));
             String op = ctx.op.getText();
             if (op.equals("*")) return left * right;
             if (op.equals("/")) return left / right;
@@ -287,8 +299,10 @@ public class WiremockJsInterpreter {
             return i < args.size() && args.get(i) != null ? String.valueOf(args.get(i)) : null;
         }
 
-        private double num(List<Object> args, int i) {
-            Object val = args.get(i);
+        private double num(Object val) {
+            if (val == null) {
+                throw new ScriptExecutionException("Ожидалось число, но получено null");
+            }
             if (val instanceof Number) {
                 return ((Number) val).doubleValue();
             }
@@ -296,10 +310,16 @@ public class WiremockJsInterpreter {
                 try {
                     return Double.parseDouble((String) val);
                 } catch (NumberFormatException e) {
-                    return 0;
+                    throw new ScriptExecutionException(
+                            "Не удалось преобразовать строку в число: \"" + val + "\"");
                 }
             }
-            return 0;
+            throw new ScriptExecutionException(
+                    "Ожидалось число, но получен тип: " + val.getClass().getSimpleName());
+        }
+
+        private double num(List<Object> args, int i) {
+            return num(args.get(i));
         }
 
         private boolean toBoolean(Object val) {
