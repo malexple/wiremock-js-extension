@@ -110,4 +110,23 @@ class ScriptGuardTest {
                 + "return { \"a\": true }; } } } }";
         assertDoesNotThrow(() -> ScriptGuard.validate(script));
     }
+
+    @Test
+    @DisplayName("MAX_SCRIPT_LENGTH читается из system property wiremockjs.max.script.length")
+    void shouldRespectConfiguredMaxScriptLength() {
+        String originalValue = System.getProperty("wiremockjs.max.script.length");
+        System.setProperty("wiremockjs.max.script.length", "50");
+        ScriptGuard.reloadMaxScriptLength();
+        try {
+            String longScript = "return { \"a\": \"" + "x".repeat(60) + "\" };";
+            assertThrows(ScriptTooLargeException.class, () -> ScriptGuard.validate(longScript));
+        } finally {
+            if (originalValue != null) {
+                System.setProperty("wiremockjs.max.script.length", originalValue);
+            } else {
+                System.clearProperty("wiremockjs.max.script.length");
+            }
+            ScriptGuard.reloadMaxScriptLength();
+        }
+    }
 }

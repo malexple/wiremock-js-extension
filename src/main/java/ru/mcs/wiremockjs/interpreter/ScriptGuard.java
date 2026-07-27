@@ -8,16 +8,24 @@ import ru.mcs.wiremockjs.exception.ScriptTooLargeException;
 // и при каждом выполнении скрипта в ScriptTransformer.
 public class ScriptGuard {
 
-    private static final int MAX_SCRIPT_LENGTH = 2000;
+    private static int maxScriptLength = readMaxScriptLength();
     private static final int MAX_NESTING_DEPTH = 5;
+
+    private static int readMaxScriptLength() {
+        return Integer.parseInt(System.getProperty("wiremockjs.max.script.length", "2000"));
+    }
+
+    static void reloadMaxScriptLength() {
+        maxScriptLength = readMaxScriptLength();
+    }
 
     public static void validate(String source) {
         if (source == null || source.isBlank()) {
             throw new ScriptTooLargeException("Скрипт не может быть пустым");
         }
-        if (source.length() > MAX_SCRIPT_LENGTH) {
+        if (source.length() > maxScriptLength) {
             throw new ScriptTooLargeException(
-                    "Скрипт превышает максимальную длину " + MAX_SCRIPT_LENGTH + " символов");
+                    "Скрипт превышает максимальную длину " + maxScriptLength + " символов");
         }
 
         int braceDepth = 0;
