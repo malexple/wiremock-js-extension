@@ -478,4 +478,110 @@ class WiremockJsInterpreterTest {
 
         assertEquals("falsy", result.get("result"));
     }
+
+    @Test
+    @DisplayName("Многоуровневая навигация по полям переменной-объекта")
+    void shouldNavigateNestedFieldsOnVariable() {
+        when(mockRequest.getBodyAsString())
+                .thenReturn("{\"amount\": 1500, \"details\": {\"city\": \"Moscow\"}}");
+
+        String script = """
+        var order = jsonField("$");
+        return { "amount": order.amount, "city": order.details.city };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(1500, result.get("amount"));
+        assertEquals("Moscow", result.get("city"));
+    }
+
+    @Test
+    @DisplayName("Навигация по отсутствующему полю объекта возвращает null")
+    void shouldReturnNullForMissingFieldOnVariable() {
+        when(mockRequest.getBodyAsString())
+                .thenReturn("{\"amount\": 1500}");
+
+        String script = """
+        var order = jsonField("$");
+        return { "city": order.details.city };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertNull(result.get("city"));
+    }
+
+    @Test
+    @DisplayName("Навигация через точку по не-объектной переменной бросает ScriptExecutionException")
+    void shouldThrowWhenNavigatingNonObjectVariable() {
+        String script = """
+        var count = 10;
+        return { "result": count.amount };
+        """;
+
+        WiremockJsInterpreter interpreter = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+
+        assertThrows(ScriptExecutionException.class, () -> interpreter.execute(script));
+    }
+
+    @Test
+    @DisplayName("Навигация через точку по необъявленной переменной бросает ScriptExecutionException")
+    void shouldThrowWhenBaseVariableNotDeclared() {
+        String script = """
+        return { "result": order.amount };
+        """;
+
+        WiremockJsInterpreter interpreter = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+
+        assertThrows(ScriptExecutionException.class, () -> interpreter.execute(script));
+    }
+
+    @Test
+    @DisplayName("Попытка обратиться к внутренним объектам WireMock через точку остаётся заблокированной")
+    void shouldStillBlockAccessToRequestObject() {
+        String script = """
+        if (request.method == "GET") {
+          return { "ok": true };
+        } else {
+          return { "ok": false };
+        }
+        """;
+
+        WiremockJsInterpreter interpreter = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+
+        assertThrows(ScriptExecutionException.class, () -> interpreter.execute(script));
+    }
+
+    @Test
+    @DisplayName("Полный сценарий: var + jsonField + многоуровневая навигация + null-проверка + contains")
+    void shouldRunFullScenarioWithNestedFieldAccess() {
+        when(mockRequest.header("Authorization"))
+                .thenReturn(new com.github.tomakehurst.wiremock.http.HttpHeader(
+                        "Authorization", "Bearer secret-token-123"));
+        when(mockRequest.getBodyAsString())
+                .thenReturn("{\"amount\": 1500}");
+
+        String script = """
+        var token = header("Authorization");
+        var order = jsonField("$");
+        if (order.amount != null && contains(token, "secret") && order.amount > 1000) {
+          return {
+            "status": 400,
+            "body": {
+              "error": "Limit exceeded",
+              "details": {
+                "maxLimit": 1000,
+                "currentAmount": order.amount
+              }
+            }
+          };
+        }
+        return { "status": 200, "approved": true };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(400L, result.get("status"));
+    }
 }

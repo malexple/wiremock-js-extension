@@ -140,8 +140,31 @@ public class WiremockJsInterpreter {
 
         @Override
         public Object visitFieldAccessExpr(WiremockJsParser.FieldAccessExprContext ctx) {
-            throw new ScriptExecutionException(
-                    "Прямой доступ к полям не поддерживается, используйте функции query()/header()/body()");
+            List<org.antlr.v4.runtime.tree.TerminalNode> identifiers = ctx.fieldAccess().IDENTIFIER();
+            String baseName = identifiers.get(0).getText();
+
+            if (!scope.containsKey(baseName)) {
+                throw new ScriptExecutionException("Переменная не объявлена: " + baseName);
+            }
+
+            Object current = scope.get(baseName);
+
+            for (int i = 1; i < identifiers.size(); i++) {
+                String segment = identifiers.get(i).getText();
+
+                if (current == null) {
+                    return null;
+                }
+                if (!(current instanceof Map)) {
+                    throw new ScriptExecutionException(
+                            "Невозможно прочитать поле '" + segment + "' у не-объекта (тип: "
+                                    + current.getClass().getSimpleName() + ")");
+                }
+
+                current = ((Map<?, ?>) current).get(segment);
+            }
+
+            return current;
         }
 
         @Override
