@@ -15,6 +15,7 @@ import java.util.Random;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
+import net.datafaker.Faker;
 
 public class WiremockJsInterpreter {
 
@@ -31,7 +32,8 @@ public class WiremockJsInterpreter {
     public Map<String, Object> execute(String source, Integer seed) {
         WiremockJsParser.ScriptContext tree = parse(source);
         Random random = seed != null ? new Random(seed) : new Random();
-        Visitor visitor = new Visitor(random);
+        Faker faker = new Faker(random);
+        Visitor visitor = new Visitor(random, faker);
         return visitor.visitScript(tree);
     }
 
@@ -53,9 +55,11 @@ public class WiremockJsInterpreter {
         private Map<String, Object> returnedValue = null;
         private final Map<String, Object> scope = new HashMap<>();
         private final Random random;
+        private final Faker faker;
 
-        Visitor(Random random) {
+        Visitor(Random random, Faker faker) {
             this.random = random;
+            this.faker = faker;
         }
 
         public Map<String, Object> visitScript(WiremockJsParser.ScriptContext ctx) {
@@ -167,6 +171,27 @@ public class WiremockJsInterpreter {
                         throw new ScriptExecutionException("Некорректное регулярное выражение: " + e.getMessage());
                     }
                 }
+                case "fake": {
+                    String pattern = str(args, 0);
+                    if (pattern == null) {
+                        throw new ScriptExecutionException("fake(): шаблон не может быть null");
+                    }
+                    try {
+                        return faker.expression(pattern);
+                    } catch (Exception e) {
+                        throw new ScriptExecutionException("Ошибка в шаблоне fake(\"" + pattern + "\"): " + e.getMessage());
+                    }
+                }
+                case "sum": return sumOf(args.get(0));
+                case "count": return (double) toList(args.get(0)).size();
+                case "avg": {
+                    List<Object> list = toList(args.get(0));
+                    if (list.isEmpty()) {
+                        throw new ScriptExecutionException("avg(): пустой массив");
+                    }
+                    return sumOf(args.get(0)) / list.size();
+                }
+                case "mapKeys": return mapKeys(toList(args.get(0)), toMap(args.get(1)));
                 default:
                     throw new ScriptExecutionException("Функция не разрешена или не существует: " + name);
             }
@@ -387,6 +412,55 @@ public class WiremockJsInterpreter {
 
         private String unquote(String raw) {
             return raw.substring(1, raw.length() - 1);
+        }
+
+        @SuppressWarnings("unchecked")
+        private List<Object> toList(Object val) {
+            if (!(val instanceof List)) {
+                throw new ScriptExecutionException(
+                        "Ожидался массив, получен: " + (val == null ? "null" : val.getClass().getSimpleName()));
+            }
+            return (List<Object>) val;
+        }
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> toMap(Object val) {
+            if (!(val instanceof Map)) {
+                throw new ScriptExecutionException(
+                        "Ожидался объект, получен: " + (val == null ? "null" : val.getClass().getSimpleName()));
+            }
+            return (Map<String, Object>) val;
+        }
+
+        private double sumOf(Object val) {
+            List<Object> list = toList(val);
+            double total = 0;
+            for (Object item : list) {
+                total += num(item);
+            }
+            return total;
+        }
+
+        private List<Object> mapKeys(List<Object> array, Map<String, Object> keyMapping) {
+            List<Object> result = new java.util.ArrayList<>();
+            for (Object item : array) {
+                if (!(item instanceof Map)) {
+                    throw new ScriptExecutionException(
+                            "mapKeys(): элемент массива не является объектом (тип: "
+                                    + (item == null ? "null" : item.getClass().getSimpleName()) + ")");
+                }
+                Map<?, ?> itemMap = (Map<?, ?>) item;
+                Map<String, Object> newMap = new LinkedHashMap<>();
+                for (Map.Entry<?, ?> entry : itemMap.entrySet()) {
+                    String oldKey = String.valueOf(entry.getKey());
+                    String newKey = keyMapping.containsKey(oldKey)
+                            ? String.valueOf(keyMapping.get(oldKey))
+                            : oldKey;
+                    newMap.put(newKey, entry.getValue());
+                }
+                result.add(newMap);
+            }
+            return result;
         }
     }
 
