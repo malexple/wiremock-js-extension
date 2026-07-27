@@ -8,6 +8,7 @@ public class ScriptDefinition {
     private String createdBy;
     private long createdAt;
     private long updatedAt;
+    private Integer seed;
 
     public ScriptDefinition() {
     }
@@ -32,4 +33,7 @@ public class ScriptDefinition {
 
     public long getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(long updatedAt) { this.updatedAt = updatedAt; }
+
+    public Integer getSeed() { return seed; }
+    public void setSeed(Integer seed) { this.seed = seed; }
 }

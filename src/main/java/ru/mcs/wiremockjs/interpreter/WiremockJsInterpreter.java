@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
+import java.util.Random;
 
 public class WiremockJsInterpreter {
 
@@ -21,8 +22,13 @@ public class WiremockJsInterpreter {
     }
 
     public Map<String, Object> execute(String source) {
+        return execute(source, null);
+    }
+
+    public Map<String, Object> execute(String source, Integer seed) {
         WiremockJsParser.ScriptContext tree = parse(source);
-        Visitor visitor = new Visitor();
+        Random random = seed != null ? new Random(seed) : new Random();
+        Visitor visitor = new Visitor(random);
         return visitor.visitScript(tree);
     }
 
@@ -42,10 +48,12 @@ public class WiremockJsInterpreter {
     private class Visitor extends ru.mcs.wiremockjs.grammar.WiremockJsBaseVisitor<Object> {
 
         private Map<String, Object> returnedValue = null;
-
-        // Function-scoped хранилище переменных — единая область видимости на весь скрипт,
-        // общая для всех веток if/else. Block-scoped (let/const) — предмет отдельной фазы.
         private final Map<String, Object> scope = new HashMap<>();
+        private final Random random;
+
+        Visitor(Random random) {
+            this.random = random;
+        }
 
         public Map<String, Object> visitScript(WiremockJsParser.ScriptContext ctx) {
             for (WiremockJsParser.StatementContext stmt : ctx.statement()) {
@@ -139,6 +147,7 @@ public class WiremockJsInterpreter {
                     }
                     return haystack.contains(needle);
                 }
+                case "random": return random.nextDouble();
                 default:
                     throw new ScriptExecutionException("Функция не разрешена или не существует: " + name);
             }
@@ -299,6 +308,10 @@ public class WiremockJsInterpreter {
             return i < args.size() && args.get(i) != null ? String.valueOf(args.get(i)) : null;
         }
 
+        private double num(List<Object> args, int i) {
+            return num(args.get(i));
+        }
+
         private double num(Object val) {
             if (val == null) {
                 throw new ScriptExecutionException("Ожидалось число, но получено null");
@@ -316,10 +329,6 @@ public class WiremockJsInterpreter {
             }
             throw new ScriptExecutionException(
                     "Ожидалось число, но получен тип: " + val.getClass().getSimpleName());
-        }
-
-        private double num(List<Object> args, int i) {
-            return num(args.get(i));
         }
 
         private boolean toBoolean(Object val) {

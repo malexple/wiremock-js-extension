@@ -687,4 +687,80 @@ class WiremockJsInterpreterTest {
 
         assertEquals(true, result.get("approved"));
     }
+
+    @Test
+    @DisplayName("random() без seed возвращает значение в диапазоне [0, 1)")
+    void shouldReturnRandomValueInRangeWithoutSeed() {
+        String script = """
+        return { "result": random() };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        double value = ((Number) result.get("result")).doubleValue();
+        assertTrue(value >= 0.0 && value < 1.0);
+    }
+
+    @Test
+    @DisplayName("random() с одинаковым seed даёт одинаковую последовательность")
+    void shouldBeDeterministicWithSameSeed() {
+        String script = """
+        return { "a": random(), "b": random(), "c": random() };
+        """;
+
+        WiremockJsInterpreter interpreter1 = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+        WiremockJsInterpreter interpreter2 = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+
+        Map<String, Object> result1 = interpreter1.execute(script, 42);
+        Map<String, Object> result2 = interpreter2.execute(script, 42);
+
+        assertEquals(result1.get("a"), result2.get("a"));
+        assertEquals(result1.get("b"), result2.get("b"));
+        assertEquals(result1.get("c"), result2.get("c"));
+    }
+
+    @Test
+    @DisplayName("random() с разными seed даёт разные последовательности")
+    void shouldDifferWithDifferentSeeds() {
+        String script = """
+        return { "a": random() };
+        """;
+
+        WiremockJsInterpreter interpreter1 = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+        WiremockJsInterpreter interpreter2 = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+
+        Map<String, Object> result1 = interpreter1.execute(script, 1);
+        Map<String, Object> result2 = interpreter2.execute(script, 2);
+
+        assertNotEquals(result1.get("a"), result2.get("a"));
+    }
+
+    @Test
+    @DisplayName("Chaos engineering сценарий: random() с seed управляет вероятностью ошибки")
+    void shouldSupportChaosEngineeringScenarioWithSeed() {
+        String script = """
+        if (random() < 0.5) {
+          return { "status": 500, "body": { "error": "internal error" } };
+        } else {
+          return { "status": 200, "body": { "ok": true } };
+        }
+        """;
+
+        WiremockJsInterpreter interpreter = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+        Map<String, Object> result = interpreter.execute(script, 7);
+
+        assertTrue(result.get("status").equals(500L) || result.get("status").equals(200L));
+    }
+
+    @Test
+    @DisplayName("Старый метод execute(source) без seed продолжает работать (обратная совместимость)")
+    void shouldKeepBackwardCompatibilityForExecuteWithoutSeed() {
+        String script = """
+        return { "status": 200 };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(200L, result.get("status"));
+    }
 }
