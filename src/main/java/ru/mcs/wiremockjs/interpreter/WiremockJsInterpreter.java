@@ -7,13 +7,13 @@ import ru.mcs.wiremockjs.exception.ScriptParseException;
 import ru.mcs.wiremockjs.grammar.WiremockJsLexer;
 import ru.mcs.wiremockjs.grammar.WiremockJsParser;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
 
 public class WiremockJsInterpreter {
 
-    // Whitelist функций, доступных скрипту. Ничего сверх этого списка вызвать нельзя.
     private final RequestFacade requestFacade;
 
     public WiremockJsInterpreter(RequestFacade requestFacade) {
@@ -43,6 +43,10 @@ public class WiremockJsInterpreter {
 
         private Map<String, Object> returnedValue = null;
 
+        // Function-scoped хранилище переменных — единая область видимости на весь скрипт,
+        // общая для всех веток if/else. Block-scoped (let/const) — предмет отдельной фазы.
+        private final Map<String, Object> scope = new HashMap<>();
+
         public Map<String, Object> visitScript(WiremockJsParser.ScriptContext ctx) {
             for (WiremockJsParser.StatementContext stmt : ctx.statement()) {
                 visit(stmt);
@@ -51,6 +55,23 @@ public class WiremockJsInterpreter {
                 }
             }
             throw new ScriptExecutionException("Скрипт завершился без оператора return");
+        }
+
+        @Override
+        public Object visitVarDeclaration(WiremockJsParser.VarDeclarationContext ctx) {
+            String name = ctx.IDENTIFIER().getText();
+            Object value = visit(ctx.expression());
+            scope.put(name, value);
+            return null;
+        }
+
+        @Override
+        public Object visitVarRefExpr(WiremockJsParser.VarRefExprContext ctx) {
+            String name = ctx.getText();
+            if (!scope.containsKey(name)) {
+                throw new ScriptExecutionException("Переменная не объявлена: " + name);
+            }
+            return scope.get(name);
         }
 
         @Override
@@ -73,12 +94,6 @@ public class WiremockJsInterpreter {
                 }
             }
             return null;
-        }
-
-        private int thenBlockSize(WiremockJsParser.IfStatementContext ctx) {
-            // Грамматика гарантирует раздельные блоки if/else через порядок правил;
-            // ANTLR разносит их по под-контекстам автоматически при генерации.
-            return ctx.getChildCount(); // упрощение для MVP — уточняется при генерации парсера
         }
 
         @Override
@@ -125,8 +140,6 @@ public class WiremockJsInterpreter {
 
         @Override
         public Object visitFieldAccessExpr(WiremockJsParser.FieldAccessExprContext ctx) {
-            // Только идентификатор "request" поддерживается как объект — доступ к его полям
-            // всегда идёт через whitelisted функции, а не через прямую навигацию свойств.
             throw new ScriptExecutionException(
                     "Прямой доступ к полям не поддерживается, используйте функции query()/header()/body()");
         }
@@ -284,6 +297,4 @@ public class WiremockJsInterpreter {
             throw new ScriptParseException("Синтаксическая ошибка [строка " + line + ":" + charPositionInLine + "] " + msg);
         }
     }
-
-
 }

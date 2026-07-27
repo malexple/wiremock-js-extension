@@ -7,6 +7,11 @@ script
 statement
     : ifStatement
     | returnStatement
+    | varDeclaration
+    ;
+
+varDeclaration
+    : VAR IDENTIFIER '=' expression ';'
     ;
 
 ifStatement
@@ -27,6 +32,7 @@ expression
     | NOT expression                                # LogicalNot
     | functionCall                                  # FuncCallExpr
     | fieldAccess                                   # FieldAccessExpr
+    | IDENTIFIER                                     # VarRefExpr
     | literal                                       # LiteralExpr
     | '(' expression ')'                            # ParenExpr
     ;
@@ -40,7 +46,7 @@ argumentList
     ;
 
 fieldAccess
-    : IDENTIFIER ('.' IDENTIFIER)*
+    : IDENTIFIER ('.' IDENTIFIER)+
     ;
 
 literal
@@ -61,6 +67,7 @@ jsonPair
 IF: 'if';
 ELSE: 'else';
 RETURN: 'return';
+VAR: 'var';
 AND: '&&';
 OR: '||';
 NOT: '!';

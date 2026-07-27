@@ -306,4 +306,97 @@ class WiremockJsInterpreterTest {
 
         assertEquals(List.of(2), result.get("result"));
     }
+
+    @Test
+    @DisplayName("var объявляет переменную и она доступна в return")
+    void shouldDeclareAndUseVariable() {
+        String script = """
+        var status = "ok";
+        return { "result": status };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals("ok", result.get("result"));
+    }
+
+    @Test
+    @DisplayName("var с результатом jsonField используется в условии")
+    void shouldUseVariableFromJsonFieldInCondition() {
+        when(mockRequest.getBodyAsString())
+                .thenReturn("{\"user\": {\"role\": \"admin\"}}");
+
+        String script = """
+        var role = jsonField("user.role");
+        if (role == "admin") {
+          return { "access": "granted" };
+        } else {
+          return { "access": "denied" };
+        }
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals("granted", result.get("access"));
+    }
+
+    @Test
+    @DisplayName("Использование необъявленной переменной бросает ScriptExecutionException")
+    void shouldThrowWhenVariableNotDeclared() {
+        String script = """
+        return { "result": undeclaredVar };
+        """;
+
+        WiremockJsInterpreter interpreter = new WiremockJsInterpreter(new RequestFacade(mockRequest));
+
+        assertThrows(ScriptExecutionException.class, () -> interpreter.execute(script));
+    }
+
+    @Test
+    @DisplayName("Повторное объявление переменной с тем же именем перезаписывает значение")
+    void shouldAllowRedeclaringVariable() {
+        String script = """
+        var x = "first";
+        var x = "second";
+        return { "result": x };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals("second", result.get("result"));
+    }
+
+    @Test
+    @DisplayName("Переменная, объявленная до if, доступна внутри веток then и else")
+    void shouldShareVariableAcrossIfElseBranches() {
+        when(mockRequest.queryParameter("amount"))
+                .thenReturn(new QueryParameter("amount", List.of("2000")));
+
+        String script = """
+        var label = "checked";
+        if (query("amount") > 1000) {
+          return { "result": label, "approved": false };
+        } else {
+          return { "result": label, "approved": true };
+        }
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals("checked", result.get("result"));
+        assertEquals(false, result.get("approved"));
+    }
+
+    @Test
+    @DisplayName("Числовая переменная участвует в арифметике")
+    void shouldUseNumericVariableInArithmetic() {
+        String script = """
+        var base = 100;
+        return { "total": base * 2 };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(200.0, result.get("total"));
+    }
 }
