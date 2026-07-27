@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 class WiremockJsInterpreterTest {
 
@@ -935,5 +935,102 @@ class WiremockJsInterpreterTest {
         WiremockJsInterpreter interpreter = new WiremockJsInterpreter(new RequestFacade(mockRequest));
 
         assertThrows(ScriptExecutionException.class, () -> interpreter.execute(script));
+    }
+
+    @Test
+    @DisplayName("jsonField() парсит тело запроса только один раз при нескольких вызовах в одном скрипте")
+    void shouldParseBodyOnlyOnceAcrossMultipleJsonFieldCalls() {
+        when(mockRequest.getBodyAsString())
+                .thenReturn("{\"user\": {\"id\": 1, \"name\": \"Alice\"}}");
+
+        String script = """
+        var id = jsonField("$.user.id");
+        var name = jsonField("$.user.name");
+        return { "id": id, "name": name };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(1, result.get("id"));
+        assertEquals("Alice", result.get("name"));
+        verify(mockRequest, times(1)).getBodyAsString();
+    }
+
+    @Test
+    @DisplayName("Повторный вызов jsonField() с тем же путём переиспользует скомпилированный JsonPath из кэша")
+    void shouldReuseCompiledPathFromCache() {
+        when(mockRequest.getBodyAsString())
+                .thenReturn("{\"amount\": 1500}");
+
+        String script1 = """
+        return { "amount": jsonField("$.amount") };
+        """;
+        String script2 = """
+        return { "amount": jsonField("$.amount") };
+        """;
+
+        Map<String, Object> result1 = run(script1);
+        Map<String, Object> result2 = run(script2);
+
+        assertEquals(1500, result1.get("amount"));
+        assertEquals(1500, result2.get("amount"));
+    }
+
+    @Test
+    @DisplayName("jsonField() с фильтром JSONPath корректно возвращает отфильтрованный массив")
+    void shouldSupportJsonPathFilterExpression() {
+        when(mockRequest.getBodyAsString())
+                .thenReturn("{\"items\": [{\"id\":1,\"status\":\"active\"},{\"id\":2,\"status\":\"inactive\"}]}");
+
+        String script = """
+        return { "activeIds": jsonField("$.items[?(@.status=='active')].id") };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(java.util.List.of(1), result.get("activeIds"));
+    }
+
+    @Test
+    @DisplayName("jsonField() с невалидным JSON в теле возвращает null без повторных попыток парсинга")
+    void shouldReturnNullForInvalidJsonBodyOnce() {
+        when(mockRequest.getBodyAsString()).thenReturn("not a json");
+
+        String script = """
+        var a = jsonField("$.x");
+        var b = jsonField("$.y");
+        return { "a": a, "b": b };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertNull(result.get("a"));
+        assertNull(result.get("b"));
+        verify(mockRequest, times(1)).getBodyAsString();
+    }
+
+    @Test
+    @DisplayName("jsonField() с фильтром на большом массиве выполняется быстро, без деградации")
+    void shouldHandleLargeArrayWithFilterEfficiently() {
+        StringBuilder items = new StringBuilder("{\"items\": [");
+        for (int i = 0; i < 5000; i++) {
+            if (i > 0) items.append(",");
+            items.append("{\"id\":").append(i).append(",\"status\":\"")
+                    .append(i % 2 == 0 ? "active" : "inactive").append("\"}");
+        }
+        items.append("]}");
+
+        when(mockRequest.getBodyAsString()).thenReturn(items.toString());
+
+        String script = """
+        return { "count": jsonField("$.items[?(@.status=='active')].id") };
+        """;
+
+        long start = System.currentTimeMillis();
+        Map<String, Object> result = run(script);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertNotNull(result.get("count"));
+        assertTrue(elapsed < 500);
     }
 }

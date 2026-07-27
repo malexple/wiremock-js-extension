@@ -2,27 +2,57 @@ package ru.mcs.wiremockjs.interpreter;
 
 import com.github.tomakehurst.wiremock.http.QueryParameter;
 import com.github.tomakehurst.wiremock.http.Request;
+import com.jayway.jsonpath.DocumentContext;
+import com.jayway.jsonpath.JsonPath;
+import com.jayway.jsonpath.PathNotFoundException;
+import ru.mcs.wiremockjs.exception.ScriptExecutionException;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.HashMap;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 // Единственная точка доступа скрипта к реальному Request WireMock.
 // Никаких прямых ссылок на внутренние объекты WireMock не отдаётся наружу.
 public class RequestFacade {
 
+    private static final Map<String, JsonPath> PATH_CACHE = new ConcurrentHashMap<>();
+
     private final Request request;
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    private JsonNode cachedBodyJson;
-    private boolean bodyJsonParsed = false;
+    private DocumentContext documentContext;
+    private boolean documentContextInitialized = false;
 
     public RequestFacade(Request request) {
         this.request = request;
+    }
+
+    public Object jsonField(String path) {
+        DocumentContext context = getOrParseDocumentContext();
+        if (context == null) {
+            return null;
+        }
+
+        JsonPath compiledPath = PATH_CACHE.computeIfAbsent(path, JsonPath::compile);
+
+        try {
+            return context.read(compiledPath);
+        } catch (PathNotFoundException e) {
+            return null;
+        } catch (Exception e) {
+            throw new ScriptExecutionException("Ошибка при чтении JSONPath \"" + path + "\": " + e.getMessage());
+        }
+    }
+
+    private DocumentContext getOrParseDocumentContext() {
+        if (!documentContextInitialized) {
+            documentContextInitialized = true;
+            try {
+                documentContext = JsonPath.parse(request.getBodyAsString());
+            } catch (Exception e) {
+                documentContext = null;
+            }
+        }
+        return documentContext;
     }
 
     public String query(String name) {
@@ -43,10 +73,6 @@ public class RequestFacade {
         return request.getMethod().getName();
     }
 
-    public String url() {
-        return request.getUrl();
-    }
-
     public String pathSegment(int index) {
         List<String> segments = splitPath(request.getUrl());
         return index >= 0 && index < segments.size() ? segments.get(index) : null;
@@ -58,62 +84,6 @@ public class RequestFacade {
             result.put(key, request.header(key).firstValue());
         }
         return result;
-    }
-
-    public Object jsonField(String path) {
-        if (path == null || path.isBlank()) {
-            return null;
-        }
-        String raw = request.getBodyAsString();
-        if (raw == null || raw.isBlank()) {
-            return null;
-        }
-        try {
-            return com.jayway.jsonpath.JsonPath.parse(raw).read(path);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private JsonNode parsedBody() {
-        if (!bodyJsonParsed) {
-            bodyJsonParsed = true;
-            String raw = request.getBodyAsString();
-            if (raw != null && !raw.isBlank()) {
-                try {
-                    cachedBodyJson = objectMapper.readTree(raw);
-                } catch (Exception e) {
-                    cachedBodyJson = null;
-                }
-            }
-        }
-        return cachedBodyJson;
-    }
-
-    private Object jsonNodeToJavaObject(JsonNode node) {
-        if (node.isTextual()) {
-            return node.asText();
-        }
-        if (node.isBoolean()) {
-            return node.asBoolean();
-        }
-        if (node.isIntegralNumber()) {
-            return node.asLong();
-        }
-        if (node.isFloatingPointNumber()) {
-            return node.asDouble();
-        }
-        if (node.isArray()) {
-            List<Object> list = new ArrayList<>();
-            node.forEach(el -> list.add(jsonNodeToJavaObject(el)));
-            return list;
-        }
-        if (node.isObject()) {
-            Map<String, Object> map = new LinkedHashMap<>();
-            node.fields().forEachRemaining(e -> map.put(e.getKey(), jsonNodeToJavaObject(e.getValue())));
-            return map;
-        }
-        return null;
     }
 
     private List<String> splitPath(String url) {
