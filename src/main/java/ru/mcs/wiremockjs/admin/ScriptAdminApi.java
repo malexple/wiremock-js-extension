@@ -12,12 +12,16 @@ import com.github.tomakehurst.wiremock.http.Request;
 import com.github.tomakehurst.wiremock.http.RequestMethod;
 import com.github.tomakehurst.wiremock.http.ResponseDefinition;
 import com.github.tomakehurst.wiremock.stubbing.ServeEvent;
+import ru.mcs.wiremockjs.exception.ScriptParseException;
+import ru.mcs.wiremockjs.exception.ScriptTooLargeException;
+import ru.mcs.wiremockjs.interpreter.ScriptGuard;
 import ru.mcs.wiremockjs.model.ScriptDefinition;
 import ru.mcs.wiremockjs.model.ScriptSummary;
 import ru.mcs.wiremockjs.storage.ScriptStore;
 import ru.mcs.wiremockjs.storage.ScriptStoreHolder;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public class ScriptAdminApi implements AdminApiExtension {
@@ -70,6 +74,13 @@ public class ScriptAdminApi implements AdminApiExtension {
                 (AdminTask) (Admin admin, ServeEvent serveEvent, PathParams pathParams) -> {
                     Request request = serveEvent.getRequest();
                     ScriptDefinition def = Json.read(request.getBodyAsString(), ScriptDefinition.class);
+
+                    try {
+                        ScriptGuard.validate(def.getSourceCode());
+                    } catch (ScriptParseException | ScriptTooLargeException e) {
+                        return errorResponse(e.getMessage(), 400);
+                    }
+
                     ScriptDefinition saved = scriptStore.save(def);
                     return jsonResponse(saved, 201);
                 });
@@ -78,6 +89,13 @@ public class ScriptAdminApi implements AdminApiExtension {
                 (AdminTask) (Admin admin, ServeEvent serveEvent, PathParams pathParams) -> {
                     Request request = serveEvent.getRequest();
                     ScriptDefinition def = Json.read(request.getBodyAsString(), ScriptDefinition.class);
+
+                    try {
+                        ScriptGuard.validate(def.getSourceCode());
+                    } catch (ScriptParseException | ScriptTooLargeException e) {
+                        return errorResponse(e.getMessage(), 400);
+                    }
+
                     def.setId(pathParams.get("id"));
                     return jsonResponse(scriptStore.save(def), 200);
                 });
@@ -90,6 +108,15 @@ public class ScriptAdminApi implements AdminApiExtension {
     }
 
     private ResponseDefinition jsonResponse(Object body, int status) {
+        return ResponseDefinitionBuilder.responseDefinition()
+                .withStatus(status)
+                .withHeader("Content-Type", "application/json")
+                .withBody(Json.write(body))
+                .build();
+    }
+
+    private ResponseDefinition errorResponse(String message, int status) {
+        Map<String, String> body = Map.of("error", message);
         return ResponseDefinitionBuilder.responseDefinition()
                 .withStatus(status)
                 .withHeader("Content-Type", "application/json")

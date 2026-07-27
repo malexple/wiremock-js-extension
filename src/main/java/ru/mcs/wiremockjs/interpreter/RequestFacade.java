@@ -7,11 +7,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+
 // Единственная точка доступа скрипта к реальному Request WireMock.
 // Никаких прямых ссылок на внутренние объекты WireMock не отдаётся наружу.
 public class RequestFacade {
 
     private final Request request;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private JsonNode cachedBodyJson;
+    private boolean bodyJsonParsed = false;
 
     public RequestFacade(Request request) {
         this.request = request;
@@ -50,6 +58,62 @@ public class RequestFacade {
             result.put(key, request.header(key).firstValue());
         }
         return result;
+    }
+
+    public Object jsonField(String path) {
+        if (path == null || path.isBlank()) {
+            return null;
+        }
+        String raw = request.getBodyAsString();
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return com.jayway.jsonpath.JsonPath.parse(raw).read(path);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private JsonNode parsedBody() {
+        if (!bodyJsonParsed) {
+            bodyJsonParsed = true;
+            String raw = request.getBodyAsString();
+            if (raw != null && !raw.isBlank()) {
+                try {
+                    cachedBodyJson = objectMapper.readTree(raw);
+                } catch (Exception e) {
+                    cachedBodyJson = null;
+                }
+            }
+        }
+        return cachedBodyJson;
+    }
+
+    private Object jsonNodeToJavaObject(JsonNode node) {
+        if (node.isTextual()) {
+            return node.asText();
+        }
+        if (node.isBoolean()) {
+            return node.asBoolean();
+        }
+        if (node.isIntegralNumber()) {
+            return node.asLong();
+        }
+        if (node.isFloatingPointNumber()) {
+            return node.asDouble();
+        }
+        if (node.isArray()) {
+            List<Object> list = new ArrayList<>();
+            node.forEach(el -> list.add(jsonNodeToJavaObject(el)));
+            return list;
+        }
+        if (node.isObject()) {
+            Map<String, Object> map = new LinkedHashMap<>();
+            node.fields().forEachRemaining(e -> map.put(e.getKey(), jsonNodeToJavaObject(e.getValue())));
+            return map;
+        }
+        return null;
     }
 
     private List<String> splitPath(String url) {

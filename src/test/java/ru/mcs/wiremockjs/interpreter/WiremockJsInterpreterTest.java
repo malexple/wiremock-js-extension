@@ -165,4 +165,145 @@ class WiremockJsInterpreterTest {
         WiremockJsInterpreter interpreter = new WiremockJsInterpreter(new RequestFacade(mockRequest));
         return interpreter.execute(script);
     }
+
+    @Test
+    @DisplayName("jsonField() читает вложенное поле из JSON-тела запроса")
+    void shouldReadNestedJsonField() {
+        when(mockRequest.getBodyAsString())
+                .thenReturn("{\"user\": {\"role\": \"admin\"}}");
+
+        String script = """
+            if (jsonField("user.role") == "admin") {
+              return { "status": 200, "body": { "access": "granted" } };
+            } else {
+              return { "status": 403, "body": { "access": "denied" } };
+            }
+            """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(200L, result.get("status"));
+    }
+
+    @Test
+    @DisplayName("jsonField() возвращает null для несуществующего пути")
+    void shouldReturnNullForMissingJsonPath() {
+        when(mockRequest.getBodyAsString()).thenReturn("{\"user\": {\"role\": \"admin\"}}");
+
+        String script = """
+            return { "city": jsonField("user.address.city") };
+            """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(null, result.get("city"));
+    }
+
+    @Test
+    @DisplayName("jsonField() безопасно обрабатывает невалидный JSON в теле")
+    void shouldReturnNullForInvalidJsonBody() {
+        when(mockRequest.getBodyAsString()).thenReturn("not a json at all");
+
+        String script = """
+            return { "field": jsonField("anything") };
+            """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(null, result.get("field"));
+    }
+
+    @Test
+    @DisplayName("jsonField() читает элемент массива по числовому индексу")
+    void shouldReadArrayElementByIndex() {
+        when(mockRequest.getBodyAsString())
+                .thenReturn("{\"items\": [{\"id\": 1}, {\"id\": 2}]}");
+
+        String script = """
+        if (jsonField("items[1].id") == 2) {
+          return { "matched": true };
+        } else {
+          return { "matched": false };
+        }
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(true, result.get("matched"));
+    }
+
+    @Test
+    @DisplayName("jsonField() с фильтром возвращает список подходящих значений")
+    void shouldReturnListForFilterExpression() {
+        when(mockRequest.getBodyAsString())
+                .thenReturn("{\"items\": [{\"id\": 1, \"status\": \"active\"}, {\"id\": 2, \"status\": \"inactive\"}]}");
+
+        String script = """
+        return { "result": jsonField("items[?(@.status=='active')].id") };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(List.of(1), result.get("result"));
+    }
+
+    @Test
+    @DisplayName("jsonField() с фильтром без совпадений возвращает пустой список")
+    void shouldReturnEmptyListWhenFilterMatchesNothing() {
+        when(mockRequest.getBodyAsString())
+                .thenReturn("{\"items\": [{\"id\": 1, \"status\": \"inactive\"}]}");
+
+        String script = """
+        return { "result": jsonField("items[?(@.status=='active')].id") };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(List.of(), result.get("result"));
+    }
+
+    @Test
+    @DisplayName("jsonField() с wildcard возвращает список всех значений по ключу")
+    void shouldReturnListForWildcardExpression() {
+        when(mockRequest.getBodyAsString())
+                .thenReturn("{\"items\": [{\"id\": 1}, {\"id\": 2}, {\"id\": 3}]}");
+
+        String script = """
+        return { "result": jsonField("items[*].id") };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(List.of(1, 2, 3), result.get("result"));
+    }
+
+    @Test
+    @DisplayName("jsonField() с wildcard на пустом массиве возвращает пустой список")
+    void shouldReturnEmptyListForWildcardOnEmptyArray() {
+        when(mockRequest.getBodyAsString())
+                .thenReturn("{\"items\": []}");
+
+        String script = """
+        return { "result": jsonField("items[*].id") };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(List.of(), result.get("result"));
+    }
+
+    @Test
+    @DisplayName("jsonField() с фильтром по числовому условию возвращает подходящие элементы")
+    void shouldReturnListForNumericFilterExpression() {
+        when(mockRequest.getBodyAsString())
+                .thenReturn("{\"items\": [{\"id\": 1, \"amount\": 500}, {\"id\": 2, \"amount\": 1500}]}");
+
+        String script = """
+        return { "result": jsonField("items[?(@.amount>1000)].id") };
+        """;
+
+        Map<String, Object> result = run(script);
+
+        assertEquals(List.of(2), result.get("result"));
+    }
 }

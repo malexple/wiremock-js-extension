@@ -115,6 +115,7 @@ public class WiremockJsInterpreter {
                 case "body": return requestFacade.body();
                 case "method": return requestFacade.method();
                 case "pathSegment": return requestFacade.pathSegment((int) num(args, 0));
+                case "jsonField": return requestFacade.jsonField(str(args, 0));
                 case "contains":
                     return str(args, 0) != null && str(args, 0).contains(str(args, 1));
                 default:
