@@ -12,6 +12,8 @@ Extension for WireMock that lets you describe dynamic stub logic using a simplif
 - [null and Safe Comparisons](#null-and-safe-comparisons)
 - [Available Objects and Functions](#available-objects-and-functions)
 - [Helper Functions (Phase 4a)](#helper-functions-phase-4a)
+- [Aggregate Functions (Phase 4c)](#aggregate-functions-phase-4c)
+- [forEach Loop (Phase 5)](#foreach-loop-phase-5)
 - [Determinism via seed](#determinism-via-seed)
 - [Return Value Format](#return-value-format)
 - [Admin API](#admin-api-en)
@@ -52,7 +54,7 @@ Default is 2000 characters.
 
 ## Script Syntax
 
-The language supports variables, conditionals, arithmetic, logical operators, whitelisted function calls, and returning a JSON object.
+The language supports variables, conditionals, forEach loops, arithmetic, logical operators, whitelisted function calls, and returning a JSON object.
 
 ```js
 var amount = query("amount");
@@ -70,6 +72,7 @@ if (amount != null && amount > 1000) {
 | `var` | `var name = query("x");` | Variable declaration, function-scoped (lives for the whole script call) |
 | `if / else` | `if (cond) { ... } else { ... }` | Conditional execution, else is optional |
 | `return` | `return { "k": "v" };` | At least one reachable return is required |
+| `for ... of` | `for (var item of items) { ... }` | Iterates over an array, intended only for search-and-return, see below |
 | Arithmetic | `+ - * / %` | All operations work with numbers (double) |
 | Comparison | `> >= < <=` | Numeric comparison |
 | Equality | `== !=` | Null-safe; numeric if both operands are numeric, otherwise string-based |
@@ -96,6 +99,8 @@ return { "discount": discount };
 ```
 
 Variables are function-scoped: a single flat scope for the entire script call, with no block nesting (`let`/`const` are not supported — a deliberate choice that keeps the interpreter simple given the script length limit is a few thousand characters).
+
+**Important:** the language does not support reassigning an already-declared variable without `var` (`total = total + 1;` is a syntax error, `ScriptParseException`). To accumulate values (sums, counts), use the built-in aggregate functions — `sum()`, `count()`, `avg()` — instead of manual accumulation inside a loop, see [Aggregate Functions](#aggregate-functions-phase-4c).
 
 ## Dot Notation Field Access
 
@@ -222,6 +227,68 @@ if (matches(email, "^[\w.]+@[\w.]+\.[a-z]+$")) {
 > **⚠️ Important — backslashes in strings:** WiremockJs does not decode escape sequences inside string literals (except `\"` to close the string). Write regexes with a single backslash — `"\w"`, `"\."`, `"\d"` — not doubled up as in Java string literals.
 
 > **⚠️ Important — regex safety:** `matches()` uses the **RE2J** engine (Google RE2) instead of the standard `java.util.regex`. This architecturally rules out ReDoS attacks (catastrophic backtracking) — any regular expression is guaranteed to run in linear time `O(n)` relative to the string length. The trade-off is that RE2J does **not support** backreferences (`\1`, `\2`) and some complex lookahead/lookbehind constructs. For typical mocking tasks (email, phone, ID format checks), this is more than sufficient.
+
+## Aggregate Functions (Phase 4c)
+
+To compute a sum, count, or average over an array of data extracted from the request body, use the built-in aggregate functions — they cover accumulation use cases without requiring a manual loop with variable reassignment (which the language deliberately doesn't support, see [Variables](#variables)).
+
+| Function | Signature | Returns | Description |
+|---|---|---|---|
+| `sum(array)` | `sum(Array) -> Number` | Sum of all numeric elements in the array | An empty array returns `0` |
+| `count(array)` | `count(Array) -> Number` | Number of elements in the array | An empty array returns `0` |
+| `avg(array)` | `avg(Array) -> Number` | Arithmetic mean of the array elements | An empty array throws `ScriptExecutionException` (division by zero) |
+
+### Usage Examples
+
+```js
+var prices = jsonField("$.items[*].price");
+
+return {
+  "totalPrice": sum(prices),
+  "itemsCount": count(prices),
+  "averagePrice": avg(prices)
+};
+```
+
+Aggregate functions take as input the result of `jsonField()` with a JSONPath that extracts an array (e.g. `$.items[*].price`), not the whole object — this way the interpreter already receives a ready-made list of numbers to compute over.
+
+## forEach Loop (Phase 5)
+
+`for (var item of items)` is a strict iterator over an already materialized array. The number of iterations always equals the array size and cannot be influenced by the script author, so the classic "infinite loop" problem is architecturally ruled out — the 100 ms execution timeout remains an additional safeguard at the whole-script level.
+
+**Important design constraint:** the loop is intended only for search-and-filter with an immediate `return` once a condition is matched — 95% of mocking scenarios boil down to exactly this pattern. Accumulating values (sums, counters) through a manual loop is not supported, because the language doesn't allow reassigning variables without `var` — use the built-in `sum()`, `count()`, `avg()` functions for that (see above).
+
+```js
+var items = jsonField("$.items");
+
+for (var item of items) {
+  if (item.status == "failed") {
+    return { "status": 400, "error": "found failed item" };
+  }
+}
+
+return { "status": 200, "ok": true };
+```
+
+The loop variable (`item` in the example above) only exists inside the loop body — before and after the loop it's either absent or restored to whatever value a variable with the same name held before, if one was already declared earlier in the script (temporary shadowing).
+
+### Combining with Aggregate Functions
+
+A typical pattern is computing an aggregate over the whole array up front via `sum()`/`count()`/`avg()`, and using `forEach` purely to locate a specific element:
+
+```js
+var items = jsonField("$.items");
+var prices = jsonField("$.items[*].price");
+var total = sum(prices);
+
+for (var item of items) {
+  if (item.vip == true) {
+    return { "status": 200, "total": total, "vipFound": true };
+  }
+}
+
+return { "status": 200, "total": total, "vipFound": false };
+```
 
 ## Determinism via seed
 
@@ -479,6 +546,44 @@ curl -X POST http://localhost:8888/__admin/extensions/wiremock-js/scripts \
 
 With `seed: 42` set, every CI pipeline run against the same stub produces the same sequence of responses — reproducibility is preserved even when using `random()`.
 
+### Example 6 — Filtering Orders with forEach and Aggregates
+
+**Create the script:**
+
+```bash
+curl -X POST http://localhost:8888/__admin/extensions/wiremock-js/scripts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "VIP order check with total",
+    "description": "Finds a VIP order in the list while also computing the total across all orders",
+    "sourceCode": "var items = jsonField(\"$.items\"); var prices = jsonField(\"$.items[*].price\"); var total = sum(prices); for (var item of items) { if (item.vip == true) { return { \"status\": 200, \"body\": { \"total\": total, \"vipFound\": true } }; } } return { \"status\": 200, \"body\": { \"total\": total, \"vipFound\": false } };"
+  }'
+```
+
+**Create the stub:**
+
+```bash
+curl -X POST http://localhost:8888/__admin/mappings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request": { "method": "POST", "urlPath": "/api/orders/check" },
+    "response": {
+      "status": 200,
+      "transformers": ["wiremock-js"],
+      "transformerParameters": { "scriptId": "<ID>" }
+    }
+  }'
+```
+
+**Verify:**
+
+```bash
+curl -X POST http://localhost:8888/api/orders/check \
+  -H "Content-Type: application/json" \
+  -d '{"items":[{"price":10,"vip":false},{"price":20,"vip":true},{"price":30,"vip":false}]}'
+# {"total":60.0,"vipFound":true}
+```
+
 ### Managing Scripts
 
 ```bash
@@ -505,9 +610,10 @@ The project includes a built-in `ScriptGuard` that validates scripts before exec
 |---|---|---|
 | Maximum script length | 2000 characters (configurable via `-Dwiremockjs.max.script.length`) | Protection against overly complex scripts |
 | Maximum `{}` nesting depth | 5 levels | Protection against overly convoluted logic |
-| Execution timeout | 100 ms | Protection against infinite loops / hangs (the language doesn't support loops, but this safeguard is kept as insurance) |
+| Execution timeout | 100 ms | Protection against infinite loops / hangs. `forEach` iterates strictly over the size of an already-materialized array and cannot hang on its own, but the overall timeout remains a safeguard for complex nested computations |
 | Regex engine | RE2J (linear, no backtracking) | Architectural protection against ReDoS attacks in `matches()` |
 | Limit on the number of variables | None (intentional) | The script length limit already physically bounds the number of `var` declarations (~220 at the 2000-character limit); a separate limit wouldn't add any additional protection |
-| Function whitelist | `query, header, body, method, pathSegment, jsonField, contains, random, now, nowPlusDays, uuid, randomInt, matches` | The script has no access to anything outside this list |
+| Variable reassignment | Not supported | `total = total + 1;` without `var` is a syntax error; use `sum()`/`count()`/`avg()` for accumulation instead |
+| Function whitelist | `query, header, body, method, pathSegment, jsonField, contains, random, now, nowPlusDays, uuid, randomInt, matches, sum, count, avg` | The script has no access to anything outside this list |
 
 Exceeding these limits or referencing disallowed constructs throws `ScriptTooLargeException`, `ScriptParseException`, or `ScriptExecutionException`, which WireMock turns into an HTTP 500 response with an error message.

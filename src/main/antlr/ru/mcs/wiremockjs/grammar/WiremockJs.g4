@@ -8,6 +8,11 @@ statement
     : ifStatement
     | returnStatement
     | varDeclaration
+    | forEachStatement
+    ;
+
+forEachStatement
+    : FOR '(' VAR IDENTIFIER OF expression ')' '{' statement* '}'
     ;
 
 varDeclaration
@@ -73,6 +78,8 @@ NULL: 'null';
 AND: '&&';
 OR: '||';
 NOT: '!';
+FOR: 'for';
+OF: 'of';
 BOOLEAN: 'true' | 'false';
 NUMBER: '-'? [0-9]+ ('.' [0-9]+)?;
 STRING: '"' (~["\\] | '\\' .)* '"';

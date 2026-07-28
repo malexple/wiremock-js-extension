@@ -432,6 +432,35 @@ public class WiremockJsInterpreter {
             return (Map<String, Object>) val;
         }
 
+        @Override
+        public Object visitForEachStatement(WiremockJsParser.ForEachStatementContext ctx) {
+            String iteratorName = ctx.IDENTIFIER().getText();
+            Object iterableObj = visit(ctx.expression());
+            List<Object> itemsList = toList(iterableObj);
+
+            boolean hadPreviousValue = scope.containsKey(iteratorName);
+            Object oldVariableValue = scope.get(iteratorName);
+
+            try {
+                for (Object item : itemsList) {
+                    scope.put(iteratorName, item);
+                    for (WiremockJsParser.StatementContext stmt : ctx.statement()) {
+                        visit(stmt);
+                        if (returnedValue != null) {
+                            return null;
+                        }
+                    }
+                }
+            } finally {
+                if (hadPreviousValue) {
+                    scope.put(iteratorName, oldVariableValue);
+                } else {
+                    scope.remove(iteratorName);
+                }
+            }
+            return null;
+        }
+
         private double sumOf(Object val) {
             List<Object> list = toList(val);
             double total = 0;
