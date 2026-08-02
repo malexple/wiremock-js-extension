@@ -37,6 +37,7 @@ public class ScriptTransformer implements ResponseDefinitionTransformerV2 {
     public ScriptTransformer(ScriptStore scriptStore) {
         this.scriptStore = scriptStore;
         FakerHolder.getInstance(); // прогрев DataFaker при создании ScriptTransformer, не на первом запросе
+        warmUpInterpreter();
     }
 
     @Override
@@ -66,14 +67,15 @@ public class ScriptTransformer implements ResponseDefinitionTransformerV2 {
         RequestFacade facade = new RequestFacade(serveEvent.getRequest());
         WiremockJsInterpreter interpreter = new WiremockJsInterpreter(facade);
 
-        Map<String, Object> result = executeWithTimeout(interpreter, definition.getSourceCode());
+        Map<String, Object> result = executeWithTimeout(interpreter, definition.getSourceCode(), definition.getSeed());
 
         return buildResponse(serveEvent.getResponseDefinition(), result);
     }
 
-    private Map<String, Object> executeWithTimeout(WiremockJsInterpreter interpreter, String source) {
+    private Map<String, Object> executeWithTimeout(
+            WiremockJsInterpreter interpreter, String source, Integer seed) {
         CompletableFuture<Map<String, Object>> future = CompletableFuture.supplyAsync(
-                () -> interpreter.execute(source));
+                () -> interpreter.execute(source, seed));
         try {
             return future.get(EXECUTION_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
@@ -117,6 +119,15 @@ public class ScriptTransformer implements ResponseDefinitionTransformerV2 {
             return builder.build();
         } catch (Exception e) {
             throw new ScriptExecutionException("Ошибка формирования ответа из результата скрипта: " + e.getMessage(), e);
+        }
+    }
+
+    private void warmUpInterpreter() {
+        try {
+            WiremockJsInterpreter warmup = new WiremockJsInterpreter(new RequestFacade(null));
+            warmup.execute("return { \"status\": 200 };");
+        } catch (Exception e) {
+            // Прогрев best-effort: неудача не критична, реальный запрос всё равно попадёт в нормальный путь
         }
     }
 }
