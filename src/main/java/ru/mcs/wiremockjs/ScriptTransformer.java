@@ -125,9 +125,9 @@ public class ScriptTransformer implements ResponseDefinitionTransformerV2 {
     private void warmUpInterpreter() {
         try {
             WiremockJsInterpreter warmup = new WiremockJsInterpreter(new RequestFacade(null));
-            warmup.execute("return { \"status\": 200 };");
+            warmup.execute("var w = fake(\"#{Name.first_name}\"); return { \"status\": 200 };");
         } catch (Exception e) {
-            // Прогрев best-effort: неудача не критична, реальный запрос всё равно попадёт в нормальный путь
+            // Прогрев best-effort: неудача не критична
         }
     }
 }
