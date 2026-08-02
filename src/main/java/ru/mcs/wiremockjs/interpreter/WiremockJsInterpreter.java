@@ -32,7 +32,7 @@ public class WiremockJsInterpreter {
     public Map<String, Object> execute(String source, Integer seed) {
         WiremockJsParser.ScriptContext tree = parse(source);
         Random random = seed != null ? new Random(seed) : new Random();
-        Faker faker = new Faker(random);
+        Faker faker = seed != null ? new Faker(random) : FakerHolder.getInstance();
         Visitor visitor = new Visitor(random, faker);
         return visitor.visitScript(tree);
     }

@@ -9,6 +9,7 @@ import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import ru.mcs.wiremockjs.exception.ScriptExecutionException;
 import ru.mcs.wiremockjs.exception.ScriptParseException;
+import ru.mcs.wiremockjs.interpreter.FakerHolder;
 import ru.mcs.wiremockjs.interpreter.RequestFacade;
 import ru.mcs.wiremockjs.interpreter.ScriptGuard;
 import ru.mcs.wiremockjs.interpreter.WiremockJsInterpreter;
@@ -35,6 +36,7 @@ public class ScriptTransformer implements ResponseDefinitionTransformerV2 {
 
     public ScriptTransformer(ScriptStore scriptStore) {
         this.scriptStore = scriptStore;
+        FakerHolder.getInstance(); // прогрев DataFaker при создании ScriptTransformer, не на первом запросе
     }
 
     @Override
