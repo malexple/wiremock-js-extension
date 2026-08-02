@@ -125,7 +125,15 @@ public class ScriptTransformer implements ResponseDefinitionTransformerV2 {
     private void warmUpInterpreter() {
         try {
             WiremockJsInterpreter warmup = new WiremockJsInterpreter(new RequestFacade(null));
-            warmup.execute("var w = fake(\"#{Name.first_name}\"); return { \"status\": 200 };");
+            warmup.execute(
+                    "var a = fake(\"#{Name.first_name}\"); " +
+                            "var b = fake(\"#{Name.last_name}\"); " +
+                            "var c = fake(\"#{Internet.email_address}\"); " +
+                            "var d = fake(\"#{Address.city}\"); " +
+                            "var e = fake(\"#{Address.street_address}\"); " +
+                            "var f = fake(\"#{Company.name}\"); " +
+                            "return { \"status\": 200 };"
+            );
         } catch (Exception e) {
             // Прогрев best-effort: неудача не критична
         }
